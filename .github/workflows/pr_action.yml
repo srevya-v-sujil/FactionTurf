@@ -1,0 +1,41 @@
+name: Add Timestamp and Send Action
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+jobs:
+  add-timestamp:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Add timestamp to Actions/action.json
+        run: |
+          # Get current UTC time in ISO 8601 format
+          timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+          # Add or replace the timestamp field
+          jq --arg time "$timestamp" '.timestamp = $time' Actions/action.json > tmp.json && mv tmp.json Actions/action.json
+
+          echo "✅ Updated action.json:"
+          cat Actions/action.json
+
+      - name: Send action to backend
+        run: |
+          ACTION=$(jq -r '.action' Actions/action.json)
+          TIMESTAMP=$(jq -r '.timestamp' Actions/action.json)
+          USERNAME=${{ github.actor }}
+
+          echo "📤 Sending $ACTION for $USERNAME at $TIMESTAMP"
+
+          curl -X POST https://faction-turf.vercel.app/api/game_action \
+            -H "Content-Type: application/json" \
+            -d "{\"username\":\"$USERNAME\", \"action\":\"$ACTION\", \"timestamp\":\"$TIMESTAMP\"}"
+
+      - name: Close PR automatically
+        uses: peter-evans/close-pull-request@v4
+        with:
+          comment: "✅ Action processed and timestamp added automatically!"
