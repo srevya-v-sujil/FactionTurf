@@ -2,7 +2,7 @@ name: Add Timestamp and Send Action
 
 on:
   pull_request:
-    types: [opened, reopened, synchronize]
+    types: [opened]
 
 jobs:
   validate-and-send:
@@ -26,7 +26,7 @@ jobs:
         run: |
           # Check valid JSON
           if ! jq empty Actions/Action.json; then
-            echo "❌ Invalid JSON syntax"
+            echo "Invalid JSON syntax"
             exit 1
           fi
 
@@ -35,11 +35,11 @@ jobs:
           NAME=$(jq -r '.name' Actions/Action.json)
 
           if [ -z "$ACTION" ] || [ -z "$NAME" ] || [ "$ACTION" = "null" ] || [ "$NAME" = "null" ]; then
-            echo "❌ 'action' and 'name' fields must exist and not be empty"
+            echo "action' and 'name' fields must exist and not be empty"
             exit 1
           fi
 
-          echo "✅ Found action='$ACTION', name='$NAME'"
+          echo "Found action='$ACTION', name='$NAME'"
           echo "ACTION=$ACTION" >> $GITHUB_ENV
           echo "NAME=$NAME" >> $GITHUB_ENV
 
@@ -47,7 +47,7 @@ jobs:
         run: |
           timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           jq --arg time "$timestamp" '.timestamp = $time' Actions/Action.json > tmp.json && mv tmp.json Actions/Action.json
-          echo "✅ Updated Actions/Action.json with timestamp:"
+          echo "Updated Actions/Action.json with timestamp:"
           cat Actions/Action.json
 
       - name: Send action to backend
@@ -59,7 +59,7 @@ jobs:
       - name: Close PR
         run: |
           gh pr close ${{ github.event.pull_request.number }} \
-            --comment "✅ Action processed and timestamp added automatically!"
+            --comment "Action processed and timestamp added automatically!"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Set up GitHub CLI
