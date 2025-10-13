@@ -2,65 +2,40 @@ name: Add Timestamp and Send Action
 
 on:
   pull_request:
-    types: [opened]
+    types: [opened, reopened, synchronize]
 
 jobs:
-  validate-and-send:
+  add-timestamp:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Check changed files
+      - name: Add timestamp to Actions/Action.json
         run: |
-          CHANGED=$(git diff --name-only HEAD^ HEAD)
-          echo "Changed files: $CHANGED"
-          if [ "$CHANGED" != "Actions/Action.json" ]; then
-            echo "❌ Only Actions/Action.json can be modified."
-            exit 1
-          fi
-
-      - name: Validate JSON fields
-        id: validate
-        run: |
-          # Check valid JSON
-          if ! jq empty Actions/Action.json; then
-            echo "Invalid JSON syntax"
-            exit 1
-          fi
-
-          # Check that both "action" and "name" exist
-          ACTION=$(jq -r '.action' Actions/Action.json)
-          NAME=$(jq -r '.name' Actions/Action.json)
-
-          if [ -z "$ACTION" ] || [ -z "$NAME" ] || [ "$ACTION" = "null" ] || [ "$NAME" = "null" ]; then
-            echo "action' and 'name' fields must exist and not be empty"
-            exit 1
-          fi
-
-          echo "Found action='$ACTION', name='$NAME'"
-          echo "ACTION=$ACTION" >> $GITHUB_ENV
-          echo "NAME=$NAME" >> $GITHUB_ENV
-
-      - name: Add timestamp
-        run: |
+          # Get current UTC time in ISO 8601 format
           timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+          # Add or replace the timestamp field
           jq --arg time "$timestamp" '.timestamp = $time' Actions/Action.json > tmp.json && mv tmp.json Actions/Action.json
-          echo "Updated Actions/Action.json with timestamp:"
+
+          echo "✅ Updated Action.json:"
           cat Actions/Action.json
 
       - name: Send action to backend
         run: |
+          ACTION=$(jq -r '.action' Actions/Action.json)
+          TIMESTAMP=$(jq -r '.timestamp' Actions/Action.json)
+          USERNAME=${{ github.actor }}
+
+          echo "📤 Sending $ACTION for $USERNAME at $TIMESTAMP"
+
           curl -X POST https://faction-turf.vercel.app/api/postInfo \
             -H "Content-Type: application/json" \
-            -d "{\"username\":\"${{ env.NAME }}\", \"action\":\"${{ env.ACTION }}\", \"timestamp\":\"$(jq -r '.timestamp' Actions/Action.json)\"}"
+            -d "{\"username\":\"$USERNAME\", \"action\":\"$ACTION\", \"timestamp\":\"$TIMESTAMP\"}"
 
-      - name: Close PR
-        run: |
-          gh pr close ${{ github.event.pull_request.number }} \
-            --comment "Action processed and timestamp added automatically!"
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Set up GitHub CLI
-        uses: cli/cli-action@v2
+      - name: Close PR automatically
+        uses: peter-evans/close-pull-request@v4
+        with:
+          comment: "✅ Action processed and timestamp added automatically!"
