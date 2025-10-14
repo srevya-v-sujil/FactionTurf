@@ -22,6 +22,8 @@ router.post("/postInfo",async(req,res)=>{
     stack={...stack,[resp?.faction]:req.body.action}
     console.log(req.body)
     res.status(200).json({"message":"Success"})}else{
+        console.log("BROK WHY")
+        console.log(resp)
         res.status(404).json({"message":"Failed"})
     }
 })
