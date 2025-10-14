@@ -21,23 +21,23 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
       
-      - name: Validate Actions.json
+      - name: Validate Action.json
         id: validate
         run: |
           # Check if file exists
-          if [ ! -f "Action/Actions.json" ]; then
-            echo "error=Actions.json file not found" >> $GITHUB_OUTPUT
+          if [ ! -f "Actions/Action.json" ]; then
+            echo "error=Action.json file not found" >> $GITHUB_OUTPUT
             exit 1
           fi
           
           # Validate JSON syntax
-          if ! jq empty Action/Actions.json 2>/dev/null; then
+          if ! jq empty Actions/Action.json 2>/dev/null; then
             echo "error=Invalid JSON syntax" >> $GITHUB_OUTPUT
             exit 1
           fi
           
           # Validate action field
-          ACTION=$(jq -r '.action' Action/Actions.json)
+          ACTION=$(jq -r '.action' Actions/Action.json)
           VALID_ACTIONS=("UP" "DOWN" "RIGHT" "LEFT" "SHOOT")
           
           if [[ ! " ${VALID_ACTIONS[@]} " =~ " ${ACTION} " ]]; then
@@ -46,7 +46,7 @@ jobs:
           fi
           
           # Validate name field exists and is not empty
-          NAME=$(jq -r '.name' Action/Actions.json)
+          NAME=$(jq -r '.name' Actions/Action.json)
           if [ -z "$NAME" ] || [ "$NAME" == "null" ]; then
             echo "error=Name field is required and cannot be empty" >> $GITHUB_OUTPUT
             exit 1
@@ -113,7 +113,7 @@ jobs:
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: '✅ Actions.json validation passed!\n\n**Action:** `${{ steps.validate.outputs.action }}`\n**Name:** `${{ steps.validate.outputs.name }}`\n**GitHub User:** [@${{ github.event.pull_request.user.login }}](${{ github.event.pull_request.user.html_url }})\n\n✅ Successfully sent to API (HTTP ${{ steps.api_call.outputs.response_code }})\n\nAuto-merging PR...'
+              body: '✅ Action.json validation passed!\n\n**Action:** `${{ steps.validate.outputs.action }}`\n**Name:** `${{ steps.validate.outputs.name }}`\n**GitHub User:** [@${{ github.event.pull_request.user.login }}](${{ github.event.pull_request.user.html_url }})\n\n✅ Successfully sent to API (HTTP ${{ steps.api_call.outputs.response_code }})\n\nAuto-merging PR...'
             })
       
       - name: Enable auto-merge
