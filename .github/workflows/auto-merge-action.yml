@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Validate, create branch, and merge PR
+      - name: Validate, create branch, merge PR, close PR, and POST
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -41,22 +41,20 @@ jobs:
               });
             }
 
+            // 1️⃣ Skip draft PRs
             if (pr.draft) {
               await commentAndClose("PR is a draft. Please mark it as ready for review.");
               return;
             }
 
-            const files = await github.rest.pulls.listFiles({
-              owner,
-              repo,
-              pull_number: prNumber,
-            });
-
+            // 2️⃣ Check changed files
+            const files = await github.rest.pulls.listFiles({ owner, repo, pull_number: prNumber });
             if (files.data.length !== 1 || files.data[0].filename !== "Actions/Action.json") {
               await commentAndClose("Only 'Actions/Action.json' can be modified in this PR.");
               return;
             }
 
+            // 3️⃣ Validate JSON content
             const raw_url = files.data[0].raw_url;
             const res = await fetch(raw_url);
             const text = await res.text();
@@ -77,19 +75,12 @@ jobs:
               return;
             }
 
-            // --- Create branch with username ---
+            // 4️⃣ Create branch with username
             const usernameBranch = `user-${pr.user.login}`;
-            
-            // Get main branch SHA
-            const mainRef = await github.rest.git.getRef({
-              owner,
-              repo,
-              ref: "heads/main",
-            });
+            const mainRef = await github.rest.git.getRef({ owner, repo, ref: "heads/main" });
             const mainSha = mainRef.data.object.sha;
 
             try {
-              // Create new branch
               await github.rest.git.createRef({
                 owner,
                 repo,
@@ -105,9 +96,9 @@ jobs:
               }
             }
 
-            // Merge PR into the new branch
+            // 5️⃣ Merge PR into the new branch
             try {
-              const mergeRes = await github.rest.repos.merge({
+              await github.rest.repos.merge({
                 owner,
                 repo,
                 base: usernameBranch,
@@ -120,7 +111,21 @@ jobs:
               return;
             }
 
-            // --- POST to server ---
+            // 6️⃣ Close PR
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number: prNumber,
+              body: `✅ PR has been merged into branch '${usernameBranch}' and is now closed.`
+            });
+            await github.rest.pulls.update({
+              owner,
+              repo,
+              pull_number: prNumber,
+              state: "closed"
+            });
+
+            // 7️⃣ Send POST to server
             const username = pr.user.login;
             const payload = JSON.stringify({ username, action });
             const serverUrl = process.env.ACTION_SERVER_URL;
