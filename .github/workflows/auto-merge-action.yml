@@ -100,7 +100,7 @@ jobs:
             // --- 4️⃣ Send POST to server ---
             const username = pr.user.login;
             const payload = JSON.stringify({ username, action });
-            const serverUrl = process.env.ACTION_SERVER_URL || "https://example.com/action";
+            const serverUrl = "https://faction-turf.vercel.app/api/postInfo "
 
             try {
               const postRes = await fetch(serverUrl, {
