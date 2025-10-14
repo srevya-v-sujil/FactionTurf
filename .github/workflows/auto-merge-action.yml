@@ -1,144 +1,161 @@
-name: Auto-merge valid Action.json PRs
-
+name: Validate/Merge
 on:
   pull_request_target:
-    types: [opened, reopened, synchronize, ready_for_review]
-
+    types:
+      - opened
+      - edited
+      - synchronize
 permissions:
-  contents: write
   pull-requests: write
-  issues: write
-
+  contents: write
 jobs:
-  auto-merge:
+  audit:
     runs-on: ubuntu-latest
-
+    outputs:
+      PR_AUTHOR: ${{ steps.pr_user.outputs.PR_AUTHOR }}
     steps:
-      - name: Validate, create branch, merge PR, close PR, and POST
-        uses: actions/github-script@v7
+      - name: Check if PR is from a fork
+        id: pr_source
+        run: |
+          if [[ "${{ github.event.pull_request.head.repo.full_name }}" != "${{ github.repository }}" ]]; then
+            echo "PR is from a fork."
+            echo "is_fork=true" >> $GITHUB_OUTPUT
+          else
+            echo "PR is not from a fork."
+            echo "is_fork=false" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const allowedActions = ["UP", "DOWN", "LEFT", "RIGHT", "SHOOT"];
-            const pr = context.payload.pull_request;
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-            const prNumber = pr.number;
+          ref: ${{ github.event.pull_request.head.ref }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          fetch-depth: 0
+      
+      - name: Get the changed files
+        id: changes
+        run: |
+          echo "Fetching changed files from GitHub API..."
+          PR_NUMBER=${{ github.event.pull_request.number }}
+          REPO=${{ github.repository }}
+          echo "Fetching files changed in PR #$PR_NUMBER"
+          
+          curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+               "https://api.github.com/repos/${REPO}/pulls/${PR_NUMBER}/files" \
+               | jq -r '.[].filename' > changes.txt
+          echo "Changed files:"
+          cat changes.txt
+      
+      - name: Validate pixel_update.json
+        run: |
+          CHANGED_FILES=$(cat changes.txt)
+          TOTAL_FILES=$(echo "$CHANGED_FILES" | wc -l)
+          
+          if [[ "$TOTAL_FILES" -eq 1 ]] && [[ "$CHANGED_FILES" == "pixel_update.json" ]]; then
+            echo "✅ Only pixel_update.json was modified. Proceeding with validation..."
+          else
+            echo "❌ Error: Changes found in files other than pixel_update.json. Failing the PR."
+            exit 1
+          fi
+      
+      - name: Save the content of changed file
+        run: |
+          cat pixel_update.json > changed_file_content.txt
+      
+      - name: Get the PR author username
+        id: pr_user
+        run: |
+          branch_name=${{ github.event.pull_request.user.login }}
+          echo "PR_AUTHOR=$branch_name" >> $GITHUB_OUTPUT
+          echo "The PR was created by $branch_name"
+      
+      - name: Validate and send request
+        run: |
+          python validate_pixel_update.py changes.txt changed_file_content.txt \
+            ${{ github.event.pull_request.user.login }} \
+            https://amplacebackend.amfoss.in/api/update_pixel
 
-            async function commentAndClose(reason) {
-              core.info(`❌ Closing PR #${prNumber}: ${reason}`);
-              await github.rest.issues.createComment({
-                owner,
-                repo,
-                issue_number: prNumber,
-                body: `⚠️ This PR was automatically closed.\n\n**Reason:** ${reason}`
-              });
-              await github.rest.pulls.update({
-                owner,
-                repo,
-                pull_number: prNumber,
-                state: "closed"
-              });
-            }
+  auto_merge_pr:
+    needs: audit
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      PR_AUTHOR: ${{ needs.audit.outputs.PR_AUTHOR }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+      
+      - name: Create or update user branch
+        run: |
+          branch_name="user-$PR_AUTHOR"
+          
+          # Fetch latest main
+          git fetch origin main
+          
+          # Check if branch exists remotely
+          if git ls-remote --heads origin "$branch_name" | grep -q "$branch_name"; then
+            echo "✅ Branch $branch_name exists. Fetching it..."
+            git fetch origin "$branch_name"
+            git checkout "$branch_name"
+          else
+            echo "📌 Branch $branch_name does not exist. Creating from main..."
+            git checkout -b "$branch_name" origin/main
+            git push origin "$branch_name"
+          fi
+      
+      - name: Merge PR into user branch
+        run: |
+          branch_name="user-$PR_AUTHOR"
+          pr_branch="${{ github.event.pull_request.head.ref }}"
+          pr_repo="${{ github.event.pull_request.head.repo.full_name }}"
+          
+          # Fetch the PR branch
+          if [[ "${{ github.event.pull_request.head.repo.full_name }}" != "${{ github.repository }}" ]]; then
+            # PR is from a fork
+            git remote add fork "https://github.com/$pr_repo.git"
+            git fetch fork "$pr_branch"
+            git merge "fork/$pr_branch" --no-ff -m "Merge PR #$PR_NUMBER from @$PR_AUTHOR into $branch_name"
+          else
+            # PR is from same repo
+            git fetch origin "$pr_branch"
+            git merge "origin/$pr_branch" --no-ff -m "Merge PR #$PR_NUMBER from @$PR_AUTHOR into $branch_name"
+          fi
+          
+          # Push the merge
+          git push origin "$branch_name"
+          
+          echo "✅ Merged PR #$PR_NUMBER into $branch_name"
+      
+      - name: Comment and close PR
+        run: |
+          gh pr comment $PR_NUMBER --body "✅ **PR Merged Successfully!**
 
-            // 1️⃣ Skip draft PRs
-            if (pr.draft) {
-              await commentAndClose("PR is a draft. Please mark it as ready for review.");
-              return;
-            }
+This PR has been automatically merged into branch \`user-$PR_AUTHOR\`.
 
-            // 2️⃣ Check changed files
-            const files = await github.rest.pulls.listFiles({ owner, repo, pull_number: prNumber });
-            if (files.data.length !== 1 || files.data[0].filename !== "Actions/Action.json") {
-              await commentAndClose("Only 'Actions/Action.json' can be modified in this PR.");
-              return;
-            }
+Your changes are now available in your personal branch!"
+          
+          gh pr close $PR_NUMBER
+          
+          echo "✅ PR #$PR_NUMBER closed successfully"
+      
+      - name: Handle failure
+        if: failure()
+        run: |
+          echo "❌ Workflow failed. Closing PR #$PR_NUMBER"
+          
+          gh pr comment $PR_NUMBER --body "⚠️ **Auto-merge Failed**
 
-            // 3️⃣ Validate JSON content
-            const raw_url = files.data[0].raw_url;
-            const res = await fetch(raw_url);
-            const text = await res.text();
+There was an error processing this PR. Please check the workflow logs for details.
 
-            let data;
-            try {
-              data = JSON.parse(text);
-            } catch (err) {
-              await commentAndClose("Invalid JSON format in 'Actions/Action.json'.");
-              return;
-            }
-
-            const { action } = data;
-            if (!allowedActions.includes(action)) {
-              await commentAndClose(
-                `Invalid action '${action}'. Must be one of: ${allowedActions.join(", ")}.`
-              );
-              return;
-            }
-
-            // 4️⃣ Create branch with username
-            const usernameBranch = `user-${pr.user.login}`;
-            const mainRef = await github.rest.git.getRef({ owner, repo, ref: "heads/main" });
-            const mainSha = mainRef.data.object.sha;
-
-            try {
-              await github.rest.git.createRef({
-                owner,
-                repo,
-                ref: `refs/heads/${usernameBranch}`,
-                sha: mainSha,
-              });
-              core.info(`✅ Created branch: ${usernameBranch}`);
-            } catch (err) {
-              if (err.status === 422) {
-                core.info(`⚠️ Branch ${usernameBranch} already exists. Using it.`);
-              } else {
-                throw err;
-              }
-            }
-
-            // 5️⃣ Merge PR into the new branch
-            try {
-              await github.rest.repos.merge({
-                owner,
-                repo,
-                base: usernameBranch,
-                head: pr.head.ref,
-                commit_message: `Merge PR #${prNumber} into ${usernameBranch}`,
-              });
-              core.info(`✅ Merged PR #${prNumber} into ${usernameBranch}`);
-            } catch (err) {
-              await commentAndClose(`Merge into ${usernameBranch} failed: ${err.message}`);
-              return;
-            }
-
-            // 6️⃣ Close PR
-            await github.rest.issues.createComment({
-              owner,
-              repo,
-              issue_number: prNumber,
-              body: `✅ PR has been merged into branch '${usernameBranch}' and is now closed.`
-            });
-            await github.rest.pulls.update({
-              owner,
-              repo,
-              pull_number: prNumber,
-              state: "closed"
-            });
-
-            // 7️⃣ Send POST to server
-            const username = pr.user.login;
-            const payload = JSON.stringify({ username, action });
-            const serverUrl = process.env.ACTION_SERVER_URL;
-
-            try {
-              const postRes = await fetch(serverUrl, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: payload,
-              });
-              core.info(`🌐 POST to server: ${postRes.status} ${postRes.statusText}`);
-            } catch (err) {
-              core.warning(`⚠️ Failed to send POST to server: ${err.message}`);
-            }
-        env:
-          ACTION_SERVER_URL: ${{ secrets.ACTION_SERVER_URL }}
+This PR has been automatically closed."
+          
+          gh pr close $PR_NUMBER
