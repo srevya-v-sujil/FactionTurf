@@ -87,7 +87,7 @@ jobs:
             -H "Content-Type: application/json" \
             -d "$PAYLOAD" \
             -w "\n%{http_code}" \
-            https://faction-turf.vercel.app/api/getPostInfo)
+            https://faction-turf.vercel.app/api/postInfo)
           
           HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
           RESPONSE_BODY=$(echo "$RESPONSE" | sed '$d')
