@@ -1,6 +1,6 @@
 import e, { Router } from "express";
 export const router=Router()
-import { PrismaClient } from "../generated/prisma";
+import { PrismaClient } from "@prisma/client";
 let mprs=0
 const client=new PrismaClient()
 let stack={p1:[],p2:[],p3:[],p4:[]}
