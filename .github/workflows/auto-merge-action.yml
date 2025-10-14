@@ -1,0 +1,116 @@
+name: Auto-merge valid Action.json PRs
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  auto-merge:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Validate, merge, or close PR
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const allowedActions = ["UP", "DOWN", "LEFT", "RIGHT", "SHOOT"];
+            const pr = context.payload.pull_request;
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const prNumber = pr.number;
+
+            async function commentAndClose(reason) {
+              core.info(`❌ Closing PR #${prNumber}: ${reason}`);
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: prNumber,
+                body: `⚠️ This PR was automatically closed.\n\n**Reason:** ${reason}`
+              });
+              await github.rest.pulls.update({
+                owner,
+                repo,
+                pull_number: prNumber,
+                state: "closed"
+              });
+            }
+
+            if (pr.draft) {
+              await commentAndClose("PR is a draft. Please mark it as ready for review.");
+              return;
+            }
+
+            // --- 1️⃣ Check changed files ---
+            const files = await github.rest.pulls.listFiles({
+              owner,
+              repo,
+              pull_number: prNumber,
+            });
+
+            if (files.data.length !== 1 || files.data[0].filename !== "Actions/Action.json") {
+              await commentAndClose("Only 'Actions/Action.json' can be modified in this PR.");
+              return;
+            }
+
+            // --- 2️⃣ Validate JSON content ---
+            const raw_url = files.data[0].raw_url;
+            const res = await fetch(raw_url);
+            const text = await res.text();
+
+            let data;
+            try {
+              data = JSON.parse(text);
+            } catch (err) {
+              await commentAndClose("Invalid JSON format in 'Actions/Action.json'.");
+              return;
+            }
+
+            const { action } = data;
+            if (!allowedActions.includes(action)) {
+              await commentAndClose(
+                `Invalid action '${action}'. Must be one of: ${allowedActions.join(", ")}.`
+              );
+              return;
+            }
+
+            // --- 3️⃣ Merge PR ---
+            try {
+              const merge = await github.rest.pulls.merge({
+                owner,
+                repo,
+                pull_number: prNumber,
+                merge_method: "squash",
+              });
+              if (!merge.data.merged) {
+                await commentAndClose(`Merge failed: ${merge.data.message}`);
+                return;
+              }
+              core.info(`✅ Merged PR #${prNumber}: ${merge.data.message}`);
+            } catch (err) {
+              await commentAndClose(`GitHub merge API error: ${err.message}`);
+              return;
+            }
+
+            // --- 4️⃣ Send POST to server ---
+            const username = pr.user.login;
+            const payload = JSON.stringify({ username, action });
+            const serverUrl = process.env.ACTION_SERVER_URL || "https://example.com/action";
+
+            try {
+              const postRes = await fetch(serverUrl, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: payload,
+              });
+              core.info(`🌐 POST to server: ${postRes.status} ${postRes.statusText}`);
+            } catch (err) {
+              core.warning(`⚠️ Failed to send POST to server: ${err.message}`);
+            }
+        env:
+          ACTION_SERVER_URL: ${{ secrets.ACTION_SERVER_URL }}
