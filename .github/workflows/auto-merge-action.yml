@@ -8,7 +8,6 @@ permissions:
   contents: write
   pull-requests: write
   issues: write
-
 jobs:
   auto-merge:
     runs-on: ubuntu-latest
@@ -79,62 +78,28 @@ jobs:
               return;
             }
 
-            // --- 3️⃣ Create a new branch and commit ---
-            const username = pr.user.login;
-            const branchName = `auto-pr-${username}`;
-
-            // Get the default branch (usually main)
-            const { data: repoData } = await github.rest.repos.get({ owner, repo });
-            const defaultBranch = repoData.default_branch;
-
-            // Get SHA of default branch
-            const { data: refData } = await github.rest.git.getRef({
-              owner,
-              repo,
-              ref: `heads/${defaultBranch}`,
-            });
-            const baseSha = refData.object.sha;
-
-            // Create new branch
+            // --- 3️⃣ Merge PR ---
             try {
-              await github.rest.git.createRef({
+              const merge = await github.rest.pulls.merge({
                 owner,
                 repo,
-                ref: `refs/heads/${branchName}`,
-                sha: baseSha,
+                pull_number: prNumber,
+                merge_method: "squash",
               });
-              core.info(`✅ Created branch '${branchName}'`);
+              if (!merge.data.merged) {
+                await commentAndClose(`Merge failed: ${merge.data.message}`);
+                return;
+              }
+              core.info(`✅ Merged PR #${prNumber}: ${merge.data.message}`);
             } catch (err) {
-              core.warning(`⚠️ Branch '${branchName}' might already exist: ${err.message}`);
+              await commentAndClose(`GitHub merge API error: ${err.message}`);
+              return;
             }
 
-            // Update file in new branch
-            const fileSha = files.data[0].sha;
-            await github.rest.repos.createOrUpdateFileContents({
-              owner,
-              repo,
-              path: "Actions/Action.json",
-              message: `Update Action.json via auto-merge`,
-              content: Buffer.from(JSON.stringify(data, null, 2)).toString('base64'),
-              branch: branchName,
-              sha: fileSha
-            });
-
-            // --- 4️⃣ Create a PR to default branch ---
-            await github.rest.pulls.create({
-              owner,
-              repo,
-              head: branchName,
-              base: defaultBranch,
-              title: `Auto PR from ${username}`,
-              body: `This PR was created automatically from ${username}'s action.`,
-            });
-
-            core.info(`✅ Pull request created from branch '${branchName}'`);
-
-            // --- 5️⃣ Send POST to server ---
+            // --- 4️⃣ Send POST to server ---
+            const username = pr.user.login;
             const payload = JSON.stringify({ username, action });
-            const serverUrl = process.env.ACTION_SERVER_URL;
+            const serverUrl = "https://faction-turf.vercel.app/api/postInfo "
 
             try {
               const postRes = await fetch(serverUrl, {
