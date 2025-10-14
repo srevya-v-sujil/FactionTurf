@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Validate, merge PR into unique branch, close PR, and POST
+      - name: Validate, merge PR, close PR, POST, and reset fork
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -75,7 +75,7 @@ jobs:
               return;
             }
 
-            // 4️⃣ Create a unique branch in the main repo for this PR
+            // 4️⃣ Create a unique branch in main repo for this PR
             const timestamp = Date.now();
             const usernameBranch = `user-${pr.user.login}-pr${prNumber}-${timestamp}`;
 
@@ -139,5 +139,24 @@ jobs:
             } catch (err) {
               core.warning(`⚠️ Failed to send POST to server: ${err.message}`);
             }
+
+            // 8️⃣ Reset the fork branch to match main repo's main
+            try {
+              const forkOwner = pr.head.repo.owner.login;
+              const forkRepo = pr.head.repo.name;
+              const forkBranch = pr.head.ref;
+
+              await github.rest.git.updateRef({
+                owner: forkOwner,
+                repo: forkRepo,
+                ref: `heads/${forkBranch}`,
+                sha: mainSha,
+                force: true
+              });
+              core.info(`✅ Reset fork branch '${forkBranch}' to main repo main`);
+            } catch (err) {
+              core.warning(`⚠️ Failed to reset fork branch: ${err.message}`);
+            }
+
         env:
           ACTION_SERVER_URL: ${{ secrets.ACTION_SERVER_URL }}
