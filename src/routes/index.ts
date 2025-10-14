@@ -2,7 +2,7 @@ import e, { Router } from "express";
 export const router=Router()
 let mprs=0
 router.get("/getInfo",(req,res)=>{
-    res.json({p1:["UP","UP"],p2:["UP","DOWN"],p3:["UP","SHOOT"]})
+    res.json({p1:["UP","UP"],p2:["UP","DOWN"],p3:["UP","SHOOT"],p4:["DOWN","SHOOT"]})
 })
 
 router.post("/postInfo",(req,res)=>{
