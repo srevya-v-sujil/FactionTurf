@@ -12,9 +12,9 @@ permissions:
 jobs:
   auto-merge:
     runs-on: ubuntu-latest
- 
+
     steps:
-      - name: Validate, create branch, merge PR, close PR, and POST
+      - name: Validate, merge PR into unique branch, close PR, and POST
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -75,8 +75,10 @@ jobs:
               return;
             }
 
-            // 4️⃣ Create branch with username
-            const usernameBranch = `user-${pr.user.login}`;
+            // 4️⃣ Create a unique branch in the main repo for this PR
+            const timestamp = Date.now();
+            const usernameBranch = `user-${pr.user.login}-pr${prNumber}-${timestamp}`;
+
             const mainRef = await github.rest.git.getRef({ owner, repo, ref: "heads/main" });
             const mainSha = mainRef.data.object.sha;
 
@@ -89,11 +91,8 @@ jobs:
               });
               core.info(`✅ Created branch: ${usernameBranch}`);
             } catch (err) {
-              if (err.status === 422) {
-                core.info(`⚠️ Branch ${usernameBranch} already exists. Using it.`);
-              } else {
-                throw err;
-              }
+              core.info(`⚠️ Branch ${usernameBranch} already exists: ${err.message}`);
+              return;
             }
 
             // 5️⃣ Merge PR into the new branch
