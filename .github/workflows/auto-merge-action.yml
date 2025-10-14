@@ -77,8 +77,10 @@ jobs:
               return;
             }
 
+            // --- Create branch with username ---
             const usernameBranch = `user-${pr.user.login}`;
             
+            // Get main branch SHA
             const mainRef = await github.rest.git.getRef({
               owner,
               repo,
@@ -103,6 +105,7 @@ jobs:
               }
             }
 
+            // Merge PR into the new branch
             try {
               const mergeRes = await github.rest.repos.merge({
                 owner,
@@ -117,7 +120,7 @@ jobs:
               return;
             }
 
-
+            // --- POST to server ---
             const username = pr.user.login;
             const payload = JSON.stringify({ username, action });
             const serverUrl = process.env.ACTION_SERVER_URL;
