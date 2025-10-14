@@ -7,6 +7,7 @@ router.get("/getInfo",(req,res)=>{
 
 router.post("/postInfo",(req,res)=>{
     mprs+=1
+    res.status(200).json({"messgae":"Success"})
 })
 router.get("/getMPRs",(req,res)=>{
     res.json(mprs)
