@@ -1,0 +1,149 @@
+# .github/workflows/auto-merge.yml
+name: Validate and Auto-Merge PR
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'Action/Actions.json'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  validate-and-merge:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      
+      - name: Validate Actions.json
+        id: validate
+        run: |
+          # Check if file exists
+          if [ ! -f "Action/Actions.json" ]; then
+            echo "error=Actions.json file not found" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          
+          # Validate JSON syntax
+          if ! jq empty Action/Actions.json 2>/dev/null; then
+            echo "error=Invalid JSON syntax" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          
+          # Validate action field
+          ACTION=$(jq -r '.action' Action/Actions.json)
+          VALID_ACTIONS=("UP" "DOWN" "RIGHT" "LEFT" "SHOOT")
+          
+          if [[ ! " ${VALID_ACTIONS[@]} " =~ " ${ACTION} " ]]; then
+            echo "error=Invalid action: $ACTION. Must be UP, DOWN, RIGHT, LEFT, or SHOOT" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          
+          # Validate name field exists and is not empty
+          NAME=$(jq -r '.name' Action/Actions.json)
+          if [ -z "$NAME" ] || [ "$NAME" == "null" ]; then
+            echo "error=Name field is required and cannot be empty" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          
+          echo "validation=success" >> $GITHUB_OUTPUT
+          echo "action=$ACTION" >> $GITHUB_OUTPUT
+          echo "name=$NAME" >> $GITHUB_OUTPUT
+      
+      - name: Send to API
+        if: success()
+        id: api_call
+        run: |
+          # Get PR author's GitHub profile info
+          GITHUB_USERNAME="${{ github.event.pull_request.user.login }}"
+          GITHUB_AVATAR="${{ github.event.pull_request.user.avatar_url }}"
+          GITHUB_PROFILE="${{ github.event.pull_request.user.html_url }}"
+          
+          # Prepare payload
+          PAYLOAD=$(jq -n \
+            --arg action "${{ steps.validate.outputs.action }}" \
+            --arg name "${{ steps.validate.outputs.name }}" \
+            --arg username "$GITHUB_USERNAME" \
+            --arg avatar "$GITHUB_AVATAR" \
+            --arg profile "$GITHUB_PROFILE" \
+            '{
+              action: $action,
+              name: $name,
+              githubUsername: $username,
+              githubAvatar: $avatar,
+              githubProfile: $profile
+            }')
+          
+          echo "Sending payload: $PAYLOAD"
+          
+          # Send POST request
+          RESPONSE=$(curl -X POST \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD" \
+            -w "\n%{http_code}" \
+            https://faction-turf.vercel.app/api/getPostInfo)
+          
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          RESPONSE_BODY=$(echo "$RESPONSE" | sed '$d')
+          
+          echo "response_code=$HTTP_CODE" >> $GITHUB_OUTPUT
+          echo "response_body=$RESPONSE_BODY" >> $GITHUB_OUTPUT
+          
+          if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+            echo "api_status=success" >> $GITHUB_OUTPUT
+            echo "✅ API call successful (HTTP $HTTP_CODE)"
+          else
+            echo "api_status=failed" >> $GITHUB_OUTPUT
+            echo "❌ API call failed (HTTP $HTTP_CODE)"
+            exit 1
+          fi
+      
+      - name: Comment validation and API success
+        if: steps.api_call.outputs.api_status == 'success'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '✅ Actions.json validation passed!\n\n**Action:** `${{ steps.validate.outputs.action }}`\n**Name:** `${{ steps.validate.outputs.name }}`\n**GitHub User:** [@${{ github.event.pull_request.user.login }}](${{ github.event.pull_request.user.html_url }})\n\n✅ Successfully sent to API (HTTP ${{ steps.api_call.outputs.response_code }})\n\nAuto-merging PR...'
+            })
+      
+      - name: Enable auto-merge
+        if: success()
+        run: |
+          gh pr merge ${{ github.event.pull_request.number }} --auto --squash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Comment on failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            let errorMessage = '❌ Process failed!\n\n';
+            
+            if ('${{ steps.validate.outputs.error }}') {
+              errorMessage += '**Validation Error:**\n${{ steps.validate.outputs.error }}\n\n';
+            }
+            
+            if ('${{ steps.api_call.outputs.api_status }}' === 'failed') {
+              errorMessage += '**API Error:**\nFailed to send data to API (HTTP ${{ steps.api_call.outputs.response_code }})\n';
+              errorMessage += 'Response: ${{ steps.api_call.outputs.response_body }}\n\n';
+            }
+            
+            errorMessage += 'Please fix the issues and push again.';
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: errorMessage
+            })
