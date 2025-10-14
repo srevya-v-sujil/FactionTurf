@@ -25,7 +25,9 @@ router.post("/postInfo",async(req,res)=>{
         }
     })
     if(resp){
-    stack={...stack,[resp?.faction]:stack[resp?.faction as keyof stackType].push(req.body.action)}
+    if (resp?.faction && resp.faction in stack) {
+    stack[resp.faction as keyof stackType].push(req.body.action);
+}
     console.log(req.body)
     res.status(200).json({"message":"Success"})}else{
         console.log("BROK WHY")
