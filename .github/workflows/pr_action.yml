@@ -1,9 +1,3 @@
-name: Add Timestamp and Send Action
-
-on:
-  pull_request:
-    types: [opened, reopened, synchronize]
-
 jobs:
   validate-and-send:
     runs-on: ubuntu-latest
@@ -12,36 +6,33 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      # 1️⃣ Install GitHub CLI first
-      - name: Set up GitHub CLI
-        uses: cli/cli-action@v2
+      # Install GitHub CLI
+      - name: Install GitHub CLI
+        run: |
+          sudo apt update
+          sudo apt install -y gh
 
-      # 2️⃣ Ensure only Actions/Action.json is changed
+      # Validate files, add timestamp, send to backend...
       - name: Check changed files
         run: |
           CHANGED=$(git diff --name-only HEAD^ HEAD)
-          echo "Changed files: $CHANGED"
           if [ "$CHANGED" != "Actions/Action.json" ]; then
             echo "❌ Only Actions/Action.json can be modified."
             exit 1
           fi
+
       - name: Validate JSON fields
-        id: validate
         run: |
           if ! jq empty Actions/Action.json; then
             echo "❌ Invalid JSON syntax"
             exit 1
           fi
-
           ACTION=$(jq -r '.action' Actions/Action.json)
           NAME=$(jq -r '.name' Actions/Action.json)
-
           if [ -z "$ACTION" ] || [ -z "$NAME" ] || [ "$ACTION" = "null" ] || [ "$NAME" = "null" ]; then
             echo "❌ 'action' and 'name' fields must exist and not be empty"
             exit 1
           fi
-
-          echo "✅ Found action='$ACTION', name='$NAME'"
           echo "ACTION=$ACTION" >> $GITHUB_ENV
           echo "NAME=$NAME" >> $GITHUB_ENV
 
@@ -49,14 +40,13 @@ jobs:
         run: |
           timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           jq --arg time "$timestamp" '.timestamp = $time' Actions/Action.json > tmp.json && mv tmp.json Actions/Action.json
-          echo "✅ Updated Actions/Action.json with timestamp:"
-          cat Actions/Action.json
 
       - name: Send action to backend
         run: |
           curl -X POST https://faction-turf.vercel.app/api/postInfo \
             -H "Content-Type: application/json" \
             -d "{\"username\":\"${{ env.NAME }}\", \"action\":\"${{ env.ACTION }}\", \"timestamp\":\"$(jq -r '.timestamp' Actions/Action.json)\"}"
+
       - name: Close PR
         run: |
           gh pr close ${{ github.event.pull_request.number }} \
