@@ -3,7 +3,13 @@ export const router=Router()
 import { PrismaClient } from "../generated/prisma";
 let mprs=0
 const client=new PrismaClient()
-let stack={p1:[],p2:[],p3:[],p4:[]}
+interface stackType{
+    p1:number[],
+    p2:number[],
+    p3:number[],
+    p4:number[],
+}
+let stack:stackType={p1:[],p2:[],p3:[],p4:[]}
 router.get("/getInfo",(req,res)=>{
     res.json({p1:["UP","UP"],p2:["UP","DOWN"],p3:["UP","SHOOT"],p4:["DOWN","SHOOT"]})
 })
@@ -19,7 +25,7 @@ router.post("/postInfo",async(req,res)=>{
         }
     })
     if(resp){
-    stack={...stack,[resp?.faction]:req.body.action}
+    stack={...stack,[resp?.faction]:stack[resp?.faction as keyof stackType].push(req.body.action)}
     console.log(req.body)
     res.status(200).json({"message":"Success"})}else{
         console.log("BROK WHY")
