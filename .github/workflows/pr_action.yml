@@ -1,27 +1,36 @@
+name: Validate, Timestamp, Send, and Close PR
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+
 jobs:
   validate-and-send:
     runs-on: ubuntu-latest
 
     steps:
+      # 1️⃣ Checkout the repo
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      # Install GitHub CLI
+      # 2️⃣ Install GitHub CLI
       - name: Install GitHub CLI
         run: |
           sudo apt update
           sudo apt install -y gh
 
-      # Validate files, add timestamp, send to backend...
+      # 3️⃣ Ensure only Actions/Action.json is changed
       - name: Check changed files
         run: |
           CHANGED=$(git diff --name-only HEAD^ HEAD)
+          echo "Changed files: $CHANGED"
           if [ "$CHANGED" != "Actions/Action.json" ]; then
             echo "❌ Only Actions/Action.json can be modified."
             exit 1
           fi
 
-      - name: Validate JSON fields
+      # 4️⃣ Validate JSON fields
+      - name: Validate JSON
         run: |
           if ! jq empty Actions/Action.json; then
             echo "❌ Invalid JSON syntax"
@@ -33,20 +42,27 @@ jobs:
             echo "❌ 'action' and 'name' fields must exist and not be empty"
             exit 1
           fi
+          echo "✅ Found action='$ACTION', name='$NAME'"
           echo "ACTION=$ACTION" >> $GITHUB_ENV
           echo "NAME=$NAME" >> $GITHUB_ENV
 
+      # 5️⃣ Add timestamp
       - name: Add timestamp
         run: |
-          timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          jq --arg time "$timestamp" '.timestamp = $time' Actions/Action.json > tmp.json && mv tmp.json Actions/Action.json
+          TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          jq --arg time "$TIMESTAMP" '.timestamp = $time' Actions/Action.json > tmp.json && mv tmp.json Actions/Action.json
+          echo "✅ Updated Actions/Action.json with timestamp:"
+          cat Actions/Action.json
+          echo "TIMESTAMP=$TIMESTAMP" >> $GITHUB_ENV
 
+      # 6️⃣ Send JSON to backend
       - name: Send action to backend
         run: |
           curl -X POST https://faction-turf.vercel.app/api/postInfo \
             -H "Content-Type: application/json" \
-            -d "{\"username\":\"${{ env.NAME }}\", \"action\":\"${{ env.ACTION }}\", \"timestamp\":\"$(jq -r '.timestamp' Actions/Action.json)\"}"
+            -d "{\"username\":\"${{ env.NAME }}\", \"action\":\"${{ env.ACTION }}\", \"timestamp\":\"${{ env.TIMESTAMP }}\"}"
 
+      # 7️⃣ Close PR automatically
       - name: Close PR
         run: |
           gh pr close ${{ github.event.pull_request.number }} \
