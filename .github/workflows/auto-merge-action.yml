@@ -8,12 +8,13 @@ permissions:
   contents: write
   pull-requests: write
   issues: write
+
 jobs:
   auto-merge:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Validate, merge, or close PR
+      - name: Validate, create branch, and merge PR
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -45,7 +46,6 @@ jobs:
               return;
             }
 
-            // --- 1️⃣ Check changed files ---
             const files = await github.rest.pulls.listFiles({
               owner,
               repo,
@@ -57,7 +57,6 @@ jobs:
               return;
             }
 
-            // --- 2️⃣ Validate JSON content ---
             const raw_url = files.data[0].raw_url;
             const res = await fetch(raw_url);
             const text = await res.text();
@@ -78,28 +77,50 @@ jobs:
               return;
             }
 
-            // --- 3️⃣ Merge PR ---
+            const usernameBranch = `user-${pr.user.login}`;
+            
+            const mainRef = await github.rest.git.getRef({
+              owner,
+              repo,
+              ref: "heads/main",
+            });
+            const mainSha = mainRef.data.object.sha;
+
             try {
-              const merge = await github.rest.pulls.merge({
+              // Create new branch
+              await github.rest.git.createRef({
                 owner,
                 repo,
-                pull_number: prNumber,
-                merge_method: "squash",
+                ref: `refs/heads/${usernameBranch}`,
+                sha: mainSha,
               });
-              if (!merge.data.merged) {
-                await commentAndClose(`Merge failed: ${merge.data.message}`);
-                return;
-              }
-              core.info(`✅ Merged PR #${prNumber}: ${merge.data.message}`);
+              core.info(`✅ Created branch: ${usernameBranch}`);
             } catch (err) {
-              await commentAndClose(`GitHub merge API error: ${err.message}`);
+              if (err.status === 422) {
+                core.info(`⚠️ Branch ${usernameBranch} already exists. Using it.`);
+              } else {
+                throw err;
+              }
+            }
+
+            try {
+              const mergeRes = await github.rest.repos.merge({
+                owner,
+                repo,
+                base: usernameBranch,
+                head: pr.head.ref,
+                commit_message: `Merge PR #${prNumber} into ${usernameBranch}`,
+              });
+              core.info(`✅ Merged PR #${prNumber} into ${usernameBranch}`);
+            } catch (err) {
+              await commentAndClose(`Merge into ${usernameBranch} failed: ${err.message}`);
               return;
             }
 
-            // --- 4️⃣ Send POST to server ---
+
             const username = pr.user.login;
             const payload = JSON.stringify({ username, action });
-            const serverUrl = "https://faction-turf.vercel.app/api/postInfo "
+            const serverUrl = process.env.ACTION_SERVER_URL;
 
             try {
               const postRes = await fetch(serverUrl, {
