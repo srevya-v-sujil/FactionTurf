@@ -14,7 +14,7 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model Users{
+model factions{
   id Int @id @default(autoincrement())
   github_Id String
   faction String
