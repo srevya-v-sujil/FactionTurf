@@ -100,7 +100,7 @@ jobs:
       - name: Send POST request to faction-turf API
         run: |
           echo "Sending POST to faction-turf backend..."
-          curl -X POST http://faction-turf.vercel.app/api/postInfo \
+          curl -X POST https://faction-turf.vercel.app/api/postInfo \
           -H "Content-Type: application/json" \
           -d "{\"username\":\"${{ github.event.pull_request.user.login }}\",\"action\":\"${{ env.ACTION }}\"}"
 
