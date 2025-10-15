@@ -4,17 +4,16 @@ import { PrismaClient } from "../generated/prisma";
 let mprs=0
 const client=new PrismaClient()
 interface stackType{
-    p1:number[],
-    p2:number[],
-    p3:number[],
-    p4:number[],
+    p1:string[],
+    p2:string[],
+    p3:String[],
+    p4:String[],
 }
 let stack:stackType={p1:[],p2:[],p3:[],p4:[]}
 router.get("/getInfo",(req,res)=>{
     const dataStack=stack
-    stack={p1:[],p2:[],p3:[],p4:[]}
-    console.log(stack)
     res.status(200).json(dataStack)
+
 })
 
 router.post("/postInfo",async(req,res)=>{
