@@ -12,7 +12,8 @@ interface stackType{
 let stack:stackType={p1:[],p2:[],p3:[],p4:[]}
 router.get("/getInfo",(req,res)=>{
     const dataStack=stack
-    stack={p1:[],p2:[],p3:[],p4:[]}
+    
+    console.log(dataStack)
     res.status(200).json(dataStack)
 })
 
