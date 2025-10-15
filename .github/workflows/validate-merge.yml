@@ -1,0 +1,133 @@
+name: Validate/Merge
+
+on:
+  pull_request_target:
+    types:
+      - opened
+      - edited
+      - synchronize
+
+permissions:
+  pull-requests: write
+  contents: write
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    outputs:
+      PR_AUTHOR: ${{ steps.pr_user.outputs.PR_AUTHOR }}
+
+    steps:
+      - name: Check if PR is from a fork
+        id: pr_source
+        run: |
+          if [[ "${{ github.event.pull_request.head.repo.full_name }}" != "${{ github.repository }}" ]]; then
+            echo "PR is from a fork."
+            echo "::set-output name=is_fork::true"
+          else
+            echo "PR is not from a fork."
+            echo "::set-output name=is_fork::false"
+          fi
+
+      - name: Checkout base branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          fetch-depth: 0
+
+      - name: Get the changed files
+        id: changes
+        run: |
+          echo "Fetching changed files from GitHub API..."
+          PR_NUMBER=${{ github.event.pull_request.number }}
+          REPO=${{ github.repository }}
+          echo "Fetching files changed in PR #$PR_NUMBER"
+          
+          curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+               "https://api.github.com/repos/${REPO}/pulls/${PR_NUMBER}/files" \
+               | jq -r '.[].filename' > changes.txt
+
+          echo "Changed files:"
+          cat changes.txt
+
+      - name: Validate Action.json change
+        run: |
+          CHANGED_FILES=$(cat changes.txt)
+          TOTAL_FILES=$(echo "$CHANGED_FILES" | wc -l)
+
+          # Ensure only Actions/Action.json is modified
+          if [[ "$TOTAL_FILES" -eq 1 ]] && [[ "$CHANGED_FILES" == "Actions/Action.json" ]]; then
+            echo "✅ Only Actions/Action.json was modified. Proceeding..."
+          else
+            echo "❌ Error: PR modifies files other than Actions/Action.json."
+            exit 1
+          fi
+
+      - name: Save the content of Action.json
+        run: cat Actions/Action.json > changed_file_content.txt
+
+      - name: Validate Action.json content
+        id: validate_action
+        run: |
+          ACTION=$(jq -r '.action' Actions/Action.json)
+          VALID_ACTIONS=("UP" "DOWN" "LEFT" "RIGHT" "SHOOT")
+
+          if [[ " ${VALID_ACTIONS[@]} " =~ " ${ACTION} " ]]; then
+            echo "✅ Valid action: $ACTION"
+          else
+            echo "❌ Invalid action: $ACTION"
+            echo "Valid options are: ${VALID_ACTIONS[*]}"
+            exit 1
+          fi
+          
+          echo "ACTION=$ACTION" >> $GITHUB_ENV
+
+      - name: Get PR author username
+        id: pr_user
+        run: |
+          branch_name=${{ github.event.pull_request.user.login }}
+          echo "PR_AUTHOR=$branch_name" >> $GITHUB_OUTPUT
+          echo "The PR was created by $branch_name"
+
+      - name: Send POST request to faction-turf API
+        run: |
+          echo "Sending POST to faction-turf backend..."
+          curl -X POST http://faction-turf.vercel.app/api/postInfo \
+          -H "Content-Type: application/json" \
+          -d "{\"username\":\"${{ github.event.pull_request.user.login }}\",\"action\":\"${{ env.ACTION }}\"}"
+
+  auto_merge_pr:
+    needs: audit
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      PR_AUTHOR: ${{ needs.audit.outputs.PR_AUTHOR }}
+      PR_NUMBER: ${{ github.event.number }}
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Create branch if not exists
+        run: |
+          branch_name=$PR_AUTHOR
+          if git ls-remote --heads origin $branch_name | grep -sw $branch_name; then
+            echo "Branch $branch_name already exists."
+          else
+            echo "Creating new branch $branch_name..."
+            git checkout -b $branch_name
+            git push --set-upstream origin $branch_name
+          fi
+
+      - name: Change base branch of PR
+        run: gh pr edit $PR_NUMBER --base $PR_AUTHOR
+
+      - name: Merge PR
+        run: gh pr merge $PR_NUMBER --merge
+
+      - name: Close PR if previous steps failed
+        if: failure()
+        run: |
+          echo "Previous steps failed. Closing PR #$PR_NUMBER"
+          gh pr close $PR_NUMBER --delete-branch
