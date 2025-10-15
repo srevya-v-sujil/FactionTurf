@@ -18,6 +18,13 @@ jobs:
       PR_AUTHOR: ${{ steps.pr_user.outputs.PR_AUTHOR }}
 
     steps:
+      # Prevent deprecated cache warnings
+      - name: Ensure cache v4 is initialized
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache
+          key: dummy-${{ runner.os }}-${{ github.run_id }}
+
       - name: Check if PR is from a fork
         id: pr_source
         run: |
@@ -106,6 +113,13 @@ jobs:
       PR_NUMBER: ${{ github.event.number }}
 
     steps:
+      # Prevent deprecated cache warnings
+      - name: Ensure cache v4 is initialized
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache
+          key: dummy-${{ runner.os }}-${{ github.run_id }}
+
       - name: Checkout Repository
         uses: actions/checkout@v4
 
