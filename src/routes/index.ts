@@ -13,7 +13,7 @@ let stack:stackType={p1:[],p2:[],p3:[],p4:[]}
 router.get("/getInfo",(req,res)=>{
     const dataStack=stack
     
-    console.log(dataStack)
+    console.log(stack)
     res.status(200).json(dataStack)
 })
 
