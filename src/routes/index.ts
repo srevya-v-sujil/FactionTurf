@@ -14,7 +14,7 @@ router.get("/getInfo",(req,res)=>{
     const dataStack=stack
     
     console.log(stack)
-    res.status(200).json(dataStack)
+    res.status(200).json(stack)
 })
 
 router.post("/postInfo",async(req,res)=>{
